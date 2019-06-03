@@ -1,0 +1,772 @@
+/*
+ * Author: James Barber, Evan Walsh
+ * Date: 4/21/2019
+ * Program: This is a simple implementation of Lucenes indexing and search capabilities. It allows for a multitude
+ * of search query types.
+ * 
+ */
+
+
+
+
+import org.apache.lucene.*;
+
+import java.io.*;
+import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Scanner;
+
+import org.apache.lucene.analysis.Analyzer;
+import org.apache.lucene.analysis.standard.StandardAnalyzer;
+import org.apache.lucene.document.Document;
+import org.apache.lucene.document.Field;
+import org.apache.lucene.document.StringField;
+import org.apache.lucene.document.TextField;
+import org.apache.lucene.index.DirectoryReader;
+import org.apache.lucene.index.IndexReader;
+import org.apache.lucene.index.IndexWriter;
+import org.apache.lucene.index.IndexWriterConfig.OpenMode;
+import org.apache.lucene.index.Term;
+import org.apache.lucene.search.BooleanClause;
+import org.apache.lucene.search.BooleanQuery;
+import org.apache.lucene.search.DisjunctionMaxQuery;
+import org.apache.lucene.search.FuzzyQuery;
+import org.apache.lucene.search.IndexSearcher;
+import org.apache.lucene.search.MatchAllDocsQuery;
+import org.apache.lucene.search.MultiPhraseQuery;
+import org.apache.lucene.search.PhraseQuery;
+import org.apache.lucene.search.PhraseQuery.Builder;
+import org.apache.lucene.search.PrefixQuery;
+import org.apache.lucene.search.Query;
+import org.apache.lucene.search.ScoreDoc;
+import org.apache.lucene.search.TermQuery;
+import org.apache.lucene.search.TermRangeQuery;
+import org.apache.lucene.search.TopDocs;
+import org.apache.lucene.search.WildcardQuery;
+import org.apache.lucene.index.IndexWriterConfig;
+//import org.apache.lucene.index.Term;
+import org.apache.lucene.store.Directory;
+import org.apache.lucene.store.FSDirectory;
+import org.apache.lucene.search.RegexpQuery;
+import org.apache.lucene.search.IndexSearcher;
+
+
+
+public class luceneDemo {
+	
+	final static int MAXNUMRESULT = 10;
+	
+	public static void makeIndex() throws IOException
+	{
+		Scanner fileInput;
+		System.out.print("Enter file name: ");
+		Scanner s = new Scanner(System.in);
+		String fileName = s.nextLine();
+		File file = new File(fileName);
+		
+		fileInput = new Scanner(file);
+			
+		String all = "";
+		boolean flag = false;
+
+		// create a standard analyzer
+		Analyzer analyzer = new StandardAnalyzer();
+		    
+		// set IndexWriter configuration 
+		IndexWriterConfig iwc = new IndexWriterConfig(analyzer);
+
+		// Create a new index in the directory, removing any
+	    // previously indexed documents:
+		iwc.setOpenMode(OpenMode.CREATE);
+
+		// directory for writing Lucene index
+		 Directory dir = FSDirectory.open(Paths.get("indexDir"));
+
+		 IndexWriter writer = new IndexWriter(dir, iwc);
+		    
+		 //create a Lucene document
+		 Document doc = new Document();  
+			
+		 //code here for processing one Bibliography record at a time
+		 //using a loop
+		 while (fileInput.hasNext())
+		{
+			 //reads each line in file
+			 String line = fileInput.nextLine();
+				
+			 //checks to see if line ends with '},' 
+			 //which signals the end of a (field, value) pair in the bibliography
+			 if (line.endsWith("},"))
+			 {
+				 all+=line;
+				 flag = true;
+			 }
+				
+			 //checks to see if line does not end with '},' 
+			 //which signals the end of a (field, value) pair in the bibliography
+			 else if (!(line.endsWith("},")))
+			 {
+				 all+=line;
+				 flag = false;
+			 }
+			 //checks to see if we are at the end of a bibliography and adds it to the Lucene document
+			 if (line.equals("}"))
+			 {
+				 all="";
+				 System.out.println();
+				 writer.addDocument(doc);
+				 doc = new Document();
+			 }
+			 //gets the (field, value) pairs in the bibliography and adds it to a Lucene document
+			 //if the value ends with '},'
+			 if(flag)
+			 {
+				 String field = all.substring(0,all.indexOf("= {")).replaceAll("\\s+","");
+				 String value = all.substring(all.indexOf("= {")+3,all.lastIndexOf("},"));
+				 System.out.println(field+ " : " +value);
+				 doc.add(new TextField(field, value, Field.Store.YES));
+				 all = "";
+			 }
+			 //gets the unique key of each bibliography document and adds it to a Lucene document
+			 else if(all.length() > 0 && all.charAt(0) == '@' && !flag && all.contains("{"))
+			 {
+				 String key = all.substring(all.indexOf("{")+1,all.length()-1);
+				 System.out.println(key);
+				 doc.add(new StringField("bibkey", key, Field.Store.YES)); 
+				 all="";
+			 }
+			 //gets the (field, value) pairs in the bibliography and adds it to a Lucene document
+			 //if the value does not end with '},'
+			 else if (!all.contains(" = {") && !flag && !all.equals(""))
+			 {
+				 String field = all.substring(0,all.indexOf(" = ")).replaceAll("\\s+","");
+				 String value = all.substring(all.indexOf(" = ")+3,all.length());
+				 System.out.println(field+ " : " +value);
+				 doc.add(new TextField(field, value, Field.Store.YES));
+				 all = "";
+			 }
+		}
+			writer.close();	
+	}
+	
+	// Creates and returns a term with field and query value
+	public static Term termcreator()
+	{
+		Scanner kbd = new Scanner(System.in);
+		System.out.println("Please enter the field:");
+		String thefield = kbd.nextLine().toLowerCase();
+		System.out.println("Please enter query:");
+		String thequery = kbd.nextLine().toLowerCase();
+		Term finalterm = new Term(thefield, thequery);
+		return finalterm;
+	}
+	
+	// Creates and returns a wildcardquery
+	public static WildcardQuery wildcardque()
+	{
+		Term wildterm = termcreator();
+		WildcardQuery wildquery = new WildcardQuery(wildterm);
+		return wildquery;
+	}
+	
+	// Creates and returns a termquery
+	public static TermQuery termQuery()
+	{
+		Term term = termcreator();
+		TermQuery termquery = new TermQuery(term);
+		return termquery;
+	}
+	
+	// Creates and returns a phrasequery
+	public static PhraseQuery phraseQuery()
+	{
+		Scanner scanner = new Scanner(System.in);
+		System.out.println("Please input the field:");
+		String field = scanner.nextLine();
+		System.out.println("Please input the phrase:");
+		String phrase = scanner.nextLine();
+		PhraseQuery phrasequery = new PhraseQuery(field, phrase);
+		return phrasequery;
+	}
+	
+	// Creates and returns a reqexpquery
+	public static RegexpQuery regularexpressions()
+	{
+		Term term = termcreator();
+		RegexpQuery regsquery = new RegexpQuery(term);
+		return regsquery;
+	}
+	
+	// Creates and returns a fuzzyquery
+	public static FuzzyQuery feelthefuzz()
+	{	
+		Scanner kbd = new Scanner(System.in);
+		System.out.println("Please enter the edit distance");
+		int editdistance = kbd.nextInt();
+		Term term = termcreator();
+		FuzzyQuery finishedfuzzyquery = new FuzzyQuery(term, editdistance);
+		return finishedfuzzyquery;
+	}
+	
+	// Creates and returns a termrangequery
+	public static TermRangeQuery ontherange()
+	{
+		Scanner kbd = new Scanner(System.in);
+		String check, lowrange = "0", highrange = "999", termfield;
+		System.out.println("Please enter the field");
+		termfield = kbd.nextLine();
+		Boolean lowertest, uppertest;
+		lowertest = false;
+		uppertest = false;
+		System.out.println("Would you like a lowrange? Y or N");
+		check = kbd.nextLine();
+		check = check.toLowerCase();
+		if(check.equals("y"))
+		{
+			lowertest = true;
+			System.out.println("Please enter the lowrange as a string");
+			lowrange = kbd.nextLine();
+		}
+		System.out.println("Would you like an upperrange? Y or N");
+		check = kbd.nextLine();
+		check = check.toLowerCase();
+		if(check.equals("y"))
+		{
+			uppertest = true;
+			System.out.println("Please enter the highrange as a string");
+			highrange = kbd.nextLine();
+		}
+		TermRangeQuery termRquery = TermRangeQuery.newStringRange(termfield, lowrange, highrange, lowertest, uppertest);
+		return termRquery;
+	}
+	
+	// Creates and returns a multiphrasequery
+	public static MultiPhraseQuery multiphrasequery()
+	{
+		Scanner kbd = new Scanner(System.in);
+		Term term;
+		String que, thefield;
+		Boolean cont;
+		System.out.println("Please specify the field");
+		{
+			thefield = kbd.nextLine().toLowerCase();
+		}
+		cont = true;
+		//changed
+		MultiPhraseQuery.Builder builder = new MultiPhraseQuery.Builder();
+		System.out.println("Please specify the max edit distance");
+		int editdistance = kbd.nextInt();
+		while(cont)
+		{
+			que = kbd.nextLine();
+			term = new Term(thefield, que);
+			builder.add(term);	
+			cont = checker();
+		}
+		MultiPhraseQuery mpq = builder.build();
+		return mpq;
+	}
+	
+	// Creates and returns a prefixquery
+	public static PrefixQuery prefqueries()
+	{
+		Term term = termcreator();
+		PrefixQuery prefque = new PrefixQuery(term);
+		return prefque;	
+	}
+	
+	// Prompts the user if they would like to add a query and returns a bool value. Helper function for some queries
+	public static boolean checker()
+	{
+		Scanner kbd = new Scanner(System.in);
+		String checks;
+		System.out.println("Would you like to add another query? Y or N");
+		checks = kbd.nextLine().toLowerCase();
+		if (checks.equals("y"))
+		{
+			return true;
+		}
+		else
+		{
+			return false;
+		}
+	}
+	
+	// Creates an returns a matchalldocsquery
+	public static MatchAllDocsQuery matchThemAll()
+    {
+        MatchAllDocsQuery matchedall = new MatchAllDocsQuery();
+        return matchedall;
+    }
+	
+	// Creates a booleanquery and outputs the result.
+	public static void bools(Directory dir) throws IOException
+	{	
+		Scanner kbd = new Scanner(System.in);
+		BooleanQuery.Builder qq = new BooleanQuery.Builder();
+		String quetype, addornot;
+		Boolean check;
+		check = true;
+		while(check)
+		{
+			System.out.println("Please specify the type of query to add:");
+			quetype = kbd.nextLine();
+			if (quetype.equals("fuzzyquery"))
+			{
+				FuzzyQuery finishedfuzzyquery = feelthefuzz();
+				System.out.println("Must this query occur? Y or N");
+				addornot = kbd.nextLine().toLowerCase();
+				if(addornot.equals("y"))
+				{
+					qq.add(finishedfuzzyquery,BooleanClause.Occur.MUST);
+					check = checker();
+				}	
+				else
+				{
+					qq.add(finishedfuzzyquery,BooleanClause.Occur.MUST_NOT);
+					check = checker();
+				}
+			}
+			else if (quetype.equals("termquery"))
+			{
+				TermQuery termquery = termQuery();
+				System.out.println("Must this query occur? Y or N");
+				addornot = kbd.nextLine().toLowerCase();
+				if(addornot.equals("y"))
+				{
+					qq.add(termquery,BooleanClause.Occur.MUST);
+					check = checker();
+				}	
+				else
+				{
+					qq.add(termquery,BooleanClause.Occur.MUST_NOT);
+					check = checker();
+				}
+			}
+			else if (quetype.equals("phrasequery"))
+			{
+				PhraseQuery phrasequery = phraseQuery();
+				System.out.println("Must this query occur? Y or N");
+				addornot = kbd.nextLine().toLowerCase();
+				if(addornot.equals("y"))
+				{
+					qq.add(phrasequery,BooleanClause.Occur.MUST);
+					check = checker();
+				}	
+				else
+				{
+					qq.add(phrasequery,BooleanClause.Occur.MUST_NOT);
+					check = checker();
+				}
+			}
+			else if (quetype.equals("regexpquery"))
+			{
+				RegexpQuery regularquery = regularexpressions();
+				System.out.println("Must this query occur? Y or N");
+				addornot = kbd.nextLine().toLowerCase();
+				if(addornot.equals("y"))
+				{
+					qq.add(regularquery,BooleanClause.Occur.MUST);
+					check = checker();
+				}	
+				else
+				{
+					qq.add(regularquery,BooleanClause.Occur.MUST_NOT);
+					check = checker();
+				}
+			}
+			else if (quetype.equals("termrangequery"))
+			{
+				TermRangeQuery rangedquery = ontherange();
+				System.out.println("Must this query occur? Y or N");
+				addornot = kbd.nextLine().toLowerCase();
+				if(addornot.equals("y"))
+				{
+					qq.add(rangedquery,BooleanClause.Occur.MUST);
+					check = checker();
+				}	
+				else
+				{
+					qq.add(rangedquery,BooleanClause.Occur.MUST_NOT);
+					check = checker();
+				}
+			}
+			else if (quetype.equals("multiphrasequery"))
+			{
+				MultiPhraseQuery mpquery = multiphrasequery();
+				System.out.println("Must this query occur? Y or N");
+				addornot = kbd.nextLine().toLowerCase();
+				if(addornot.equals("y"))
+				{
+					qq.add(mpquery,BooleanClause.Occur.MUST);
+					check = checker();
+				}	
+				else
+				{
+					qq.add(mpquery,BooleanClause.Occur.MUST_NOT);
+					check = checker();
+				}
+			}
+			else if (quetype.equals("prefixquery"))
+			{
+				PrefixQuery pfq = prefqueries();
+				System.out.println("Must this query occur? Y or N");
+				addornot = kbd.nextLine().toLowerCase();
+				if(addornot.equals("y"))
+				{
+					qq.add(pfq,BooleanClause.Occur.MUST);
+					check = checker();
+				}	
+				else
+				{
+					qq.add(pfq,BooleanClause.Occur.MUST_NOT);
+					check = checker();
+				}
+			}
+			else if (quetype.equals("wildcardquery"))
+			{
+				WildcardQuery wcq = wildcardque();
+				System.out.println("Must this query occur? Y or N");
+				addornot = kbd.nextLine().toLowerCase();
+				if(addornot.equals("y"))
+				{
+					qq.add(wcq,BooleanClause.Occur.MUST);
+					check = checker();
+				}	
+				else
+				{
+					qq.add(wcq,BooleanClause.Occur.MUST_NOT);
+					check = checker();
+				}
+			}
+		}
+		IndexReader reader = DirectoryReader.open(dir);
+	    IndexSearcher searcher = new IndexSearcher(reader);
+	    BooleanQuery newq = qq.build();
+		TopDocs topDocs = searcher.search(newq, 10);
+		int resultSetSize = Math.min(MAXNUMRESULT, Math.toIntExact(topDocs.totalHits.value));
+		System.out.println("\nResult set size (Boolean query): " + resultSetSize);
+		ScoreDoc[] resultSet = topDocs.scoreDocs;
+		for (int i = 0; i < resultSetSize; i++)
+		{
+			System.out.println("Document = " + resultSet[i].doc + "\t" + " Score=" + resultSet[i].score);
+		}
+		}
+	
+	// Creates a disjunctmaxquery and outputs the result.
+	public static void disjuncts(Directory dir) throws IOException
+	{	
+		Scanner kbd = new Scanner(System.in);
+		List<Query> disjuncts = new ArrayList<Query>();
+		String quetype, searchtype;
+		Boolean check;
+		check = true;
+		while(check)
+		{
+			System.out.println("Please specify the type of query to add");
+			searchtype = kbd.nextLine();
+			if (searchtype.equals("fuzzyquery"))
+			{
+				FuzzyQuery finishedfuzzyquery = feelthefuzz();
+				disjuncts.add(finishedfuzzyquery);
+				check = checker();
+			}
+			else if (searchtype.equals("regexpquery"))
+			{
+				RegexpQuery regsquery = regularexpressions();
+				disjuncts.add(regsquery);
+				check = checker();
+			}
+			else if (searchtype.equals("termquery"))
+			{
+				TermQuery termquery = termQuery();
+				disjuncts.add(termquery);
+				check = checker();
+			}
+			else if (searchtype.equals("phrasequery"))
+			{
+				PhraseQuery phrasequery = phraseQuery();
+				disjuncts.add(phrasequery);
+				check = checker();
+			}
+			else if (searchtype.equals("termrangequery"))
+			{
+				TermRangeQuery termsrangequery = ontherange();
+				disjuncts.add(termsrangequery);
+				check = checker();
+			}
+			else if (searchtype.equals("multiphrasequery"))
+			{
+				MultiPhraseQuery mpquery = multiphrasequery();
+				disjuncts.add(mpquery);
+				check = checker();
+			}
+			else if (searchtype.equals("prefixquery"))
+			{
+				PrefixQuery pfq = prefqueries();
+				disjuncts.add(pfq);
+				check = checker();
+			}
+			else if (searchtype.equals("wildcardquery"))
+			{
+				Query wcq = wildcardque();
+				disjuncts.add(wcq);
+				check = checker();
+			}
+		}
+			IndexReader reader = DirectoryReader.open(dir);
+		    IndexSearcher searcher = new IndexSearcher(reader);
+			Query finisheddisjunct = new DisjunctionMaxQuery(disjuncts, 0.0f);
+			TopDocs topDocs = searcher.search(finisheddisjunct, 10);
+			int resultSetSize = Math.min(MAXNUMRESULT, Math.toIntExact(topDocs.totalHits.value));
+			System.out.println("\nResult set size (Term query): " + resultSetSize);
+			ScoreDoc[] resultSet = topDocs.scoreDocs;
+			for (int i = 0; i < resultSetSize; i++)
+			{
+				System.out.println("Document = " + resultSet[i].doc + "\t" + " Score=" + resultSet[i].score);
+			}
+		}
+	
+	public static void main(String[] args) throws IOException
+	{
+		/*Gets the file ready for indexing
+		Scanner scanner = new Scanner(System.in);
+		System.out.println("Please input the filepath for the corpus to be analyzed.");
+		String filepath = scanner.next();
+		File file = new File(filepath);
+		scanner = new Scanner(file);
+		*/
+		
+		Scanner fileInput;
+		System.out.print("Enter file name: ");
+		Scanner s = new Scanner(System.in);
+		String fileName = s.nextLine();
+		File file = new File(fileName);
+		
+		fileInput = new Scanner(file);
+			
+		String all = "";
+		boolean flag = false;
+
+		// create a standard analyzer
+		Analyzer analyzer = new StandardAnalyzer();
+		    
+		// set IndexWriter configuration 
+		IndexWriterConfig iwc = new IndexWriterConfig(analyzer);
+
+		// Create a new index in the directory, removing any
+	    // previously indexed documents:
+		iwc.setOpenMode(OpenMode.CREATE);
+
+		// directory for writing Lucene index
+		 Directory dir = FSDirectory.open(Paths.get("indexDir"));
+
+		 IndexWriter writer = new IndexWriter(dir, iwc);
+		    
+		 //create a Lucene document
+		 Document doc = new Document();  
+			
+		 //code here for processing one Bibliography record at a time
+		 //using a loop
+		 while (fileInput.hasNext())
+		{
+			 //reads each line in file
+			 String line = fileInput.nextLine();
+				
+			 //checks to see if line ends with '},' 
+			 //which signals the end of a (field, value) pair in the bibliography
+			 if (line.endsWith("},"))
+			 {
+				 all+=line;
+				 flag = true;
+			 }
+				
+			 //checks to see if line does not end with '},' 
+			 //which signals the end of a (field, value) pair in the bibliography
+			 else if (!(line.endsWith("},")))
+			 {
+				 all+=line;
+				 flag = false;
+			 }
+			 //checks to see if we are at the end of a bibliography and adds it to the Lucene document
+			 if (line.equals("}"))
+			 {
+				 all="";
+				 System.out.println();
+				 writer.addDocument(doc);
+				 doc = new Document();
+			 }
+			 //gets the (field, value) pairs in the bibliography and adds it to a Lucene document
+			 //if the value ends with '},'
+			 if(flag)
+			 {
+				 String field = all.substring(0,all.indexOf("= {")).replaceAll("\\s+","");
+				 String value = all.substring(all.indexOf("= {")+3,all.lastIndexOf("},"));
+				 System.out.println(field+ " : " +value);
+				 doc.add(new TextField(field, value, Field.Store.YES));
+				 all = "";
+			 }
+			 //gets the unique key of each bibliography document and adds it to a Lucene document
+			 else if(all.length() > 0 && all.charAt(0) == '@' && !flag && all.contains("{"))
+			 {
+				 String key = all.substring(all.indexOf("{")+1,all.length()-1);
+				 System.out.println(key);
+				 doc.add(new StringField("bibkey", key, Field.Store.YES)); 
+				 all="";
+			 }
+			 //gets the (field, value) pairs in the bibliography and adds it to a Lucene document
+			 //if the value does not end with '},'
+			 else if (!all.contains(" = {") && !flag && !all.equals(""))
+			 {
+				 String field = all.substring(0,all.indexOf(" = ")).replaceAll("\\s+","");
+				 String value = all.substring(all.indexOf(" = ")+3,all.length());
+				 System.out.println(field+ " : " +value);
+				 doc.add(new TextField(field, value, Field.Store.YES));
+				 all = "";
+			 }
+		}
+			writer.close();	
+		//This if statement goes in the main, assumed user entered query and type of query first
+		//searchtype assumed name for string response to querytype.
+		
+		IndexReader reader = DirectoryReader.open(dir);
+        IndexSearcher searcher = new IndexSearcher(reader);
+        	System.out.println("Please enter the query type or !help for help:");
+        	Scanner type = new Scanner(System.in);
+			String searchtype = type.nextLine();
+			
+			// Allows the user to see the different query types possible.
+			if(searchtype.equals("!help"))
+			{
+				System.out.println("For the query type simply type them as the appear:");
+				System.out.println("wildcardquery	fuzzyquery			regexpquery");
+				System.out.println("termrangequery	multiphrasequery	prefixquery");
+				System.out.println("booleanquery	disjunctmaxquery	termquery");
+				System.out.println("matchalldocsquery");
+				searchtype = type.nextLine();
+			}
+			// Checks for the different query types and executes code based on them.
+			if(searchtype.equals("wildcardquery"))
+			{
+				WildcardQuery wildquery = wildcardque();
+				TopDocs topDocs = searcher.search(wildquery, 10);
+				int resultSetSize = Math.min(MAXNUMRESULT, Math.toIntExact(topDocs.totalHits.value));
+				System.out.println("\nResult set size (Wildcard query): " + resultSetSize);
+				ScoreDoc[] resultSet = topDocs.scoreDocs;
+				for (int i = 0; i < resultSetSize; i++)
+				{
+					System.out.println("Document = " + resultSet[i].doc + "\t" + " Score=" + resultSet[i].score);
+				}
+			}
+			else if (searchtype.equals("termquery"))
+			{
+				TermQuery termquery = termQuery();
+				TopDocs topDocs = searcher.search(termquery, 10);
+				int resultSetSize = Math.min(MAXNUMRESULT, Math.toIntExact(topDocs.totalHits.value));
+				System.out.println("\nResult set size (Term query): " + resultSetSize);
+				ScoreDoc[] resultSet = topDocs.scoreDocs;
+				for (int i = 0; i < resultSetSize; i++)
+				{
+					System.out.println("Document = " + resultSet[i].doc + "\t" + " Score=" + resultSet[i].score);
+				}
+			}
+			else if (searchtype.equals("phrasequery"))
+			{
+				PhraseQuery phrasequery = phraseQuery();
+				TopDocs topDocs = searcher.search(phrasequery, 10);
+				int resultSetSize = Math.min(MAXNUMRESULT, Math.toIntExact(topDocs.totalHits.value));
+				System.out.println("\nResult set size (Phrase query): " + resultSetSize);
+				ScoreDoc[] resultSet = topDocs.scoreDocs;
+				for (int i = 0; i < resultSetSize; i++)
+				{
+					System.out.println("Document = " + resultSet[i].doc + "\t" + " Score=" + resultSet[i].score);
+				}
+			}
+			else if (searchtype.equals("fuzzyquery"))
+			{
+				FuzzyQuery finishedfuzzyquery = feelthefuzz();
+				TopDocs topDocs = searcher.search(finishedfuzzyquery, 10);
+				int resultSetSize = Math.min(MAXNUMRESULT, Math.toIntExact(topDocs.totalHits.value));
+				System.out.println("\nResult set size (Fuzzy query): " + resultSetSize);
+				ScoreDoc[] resultSet = topDocs.scoreDocs;
+				for (int i = 0; i < resultSetSize; i++)
+				{
+					System.out.println("Document = " + resultSet[i].doc + "\t" + " Score=" + resultSet[i].score);
+				}
+			}
+			else if (searchtype.equals("regexpquery"))
+			{
+				RegexpQuery regquery = regularexpressions();
+				TopDocs topDocs = searcher.search(regquery, 10);
+				int resultSetSize = Math.min(MAXNUMRESULT, Math.toIntExact(topDocs.totalHits.value));
+				System.out.println("\nResult set size (regexp query): " + resultSetSize);
+				ScoreDoc[] resultSet = topDocs.scoreDocs;
+				for (int i = 0; i < resultSetSize; i++)
+				{
+					System.out.println("Document = " + resultSet[i].doc + "\t" + " Score=" + resultSet[i].score);
+				}
+			}
+			else if (searchtype.equals("termrangequery"))
+			{
+				TermRangeQuery tRangequery = ontherange();
+				TopDocs topDocs = searcher.search(tRangequery, 10);
+				int resultSetSize = Math.min(MAXNUMRESULT, Math.toIntExact(topDocs.totalHits.value));
+				System.out.println("\nResult set size (Term range query): " + resultSetSize);
+				ScoreDoc[] resultSet = topDocs.scoreDocs;
+				for (int i = 0; i < resultSetSize; i++)
+				{
+					System.out.println("Document = " + resultSet[i].doc + "\t" + " Score=" + resultSet[i].score);
+				}
+			}
+			else if (searchtype.equals("multiphrasequery"))
+			{
+				MultiPhraseQuery mPquery = multiphrasequery();
+				TopDocs topDocs = searcher.search(mPquery, 10);
+				int resultSetSize = Math.min(MAXNUMRESULT, Math.toIntExact(topDocs.totalHits.value));
+				System.out.println("\nResult set size (Multiphase query): " + resultSetSize);
+				ScoreDoc[] resultSet = topDocs.scoreDocs;
+				for (int i = 0; i < resultSetSize; i++)
+				{
+					System.out.println("Document = " + resultSet[i].doc + "\t" + " Score=" + resultSet[i].score);
+				}
+			}
+			else if (searchtype.equals("prefixquery"))
+			{
+				PrefixQuery pfq = prefqueries();
+				TopDocs topDocs = searcher.search(pfq, 10);
+				int resultSetSize = Math.min(MAXNUMRESULT, Math.toIntExact(topDocs.totalHits.value));
+				System.out.println("\nResult set size (Prefix query): " + resultSetSize);
+				ScoreDoc[] resultSet = topDocs.scoreDocs;
+				for (int i = 0; i < resultSetSize; i++)
+				{
+					System.out.println("Document = " + resultSet[i].doc + "\t" + " Score=" + resultSet[i].score);
+				}
+			}
+			// These last queries have their own internal output code so there is no need to have topDocs and print methods.
+			else if (searchtype.equals("booleanquery"))
+			{
+				bools(dir);
+				
+			}
+			else if (searchtype.equals("disjunctmaxquery"))
+			{
+				disjuncts(dir);
+				
+			}
+			else if (searchtype.equals("matchalldocsquery"))
+			{
+				MatchAllDocsQuery mad = matchThemAll();
+				TopDocs topDocs = searcher.search(mad, 10);
+				int resultSetSize = Math.min(MAXNUMRESULT, Math.toIntExact(topDocs.totalHits.value));
+				System.out.println("\nResult set size (Prefix query): " + resultSetSize);
+				ScoreDoc[] resultSet = topDocs.scoreDocs;
+				for (int i = 0; i < resultSetSize; i++)
+				{
+					System.out.println("Document = " + resultSet[i].doc + "\t" + " Score=" + resultSet[i].score);
+				}
+			}
+
+
+	}	
+	}	
